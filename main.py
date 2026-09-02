@@ -1,20 +1,26 @@
-import os, telebot, requests, random
+import os, telebot, requests, random, time
 from flask import Flask
 import threading
 from datetime import datetime
 
 TOKEN = os.getenv("BOT_TOKEN")
-bot = telebot.TeleBot(TOKEN)
+bot = telebot.TeleBot(TOKEN, threaded=False)
+# FORÇA MATAR WEBHOOK ANTIGO - resolve 409
+try:
+    bot.remove_webhook()
+    time.sleep(2)
+except:
+    pass
+
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "BOT V6 MULTI MERCADOS ON", 200
+    return "BOT V6.1 FIX 409 ON", 200
 
 placar = {"green":0,"red":0,"pendente":0}
 
 def calc_prob(time1, time2):
-    # Gera % estável baseada nos nomes - não muda toda hora
     seed = sum(ord(c) for c in time1+time2)
     random.seed(seed)
     return {
@@ -28,11 +34,11 @@ def calc_prob(time1, time2):
 
 def buscar_v6():
     try:
-        msg = f"🤖 PERFINA V6 - ANÁLISE COMPLETA\n📅 {datetime.now().strftime('%d/%m/%Y')}\n━━━━━━━━━━━━━━━\n\n"
-        ligas = ['eng.1','esp.1','bra.1','ger.1','ita.1']
+        msg = f"🤖 PERFINA V6.1 - ANÁLISE COMPLETA\n📅 {datetime.now().strftime('%d/%m/%Y')}\n━━━━━━━━━━━━━━━\n\n"
+        ligas = ['eng.1','esp.1','bra.1']
         count=0
         for liga in ligas:
-            if count>=3: break # 3 jogos pra não ficar gigante
+            if count>=3: break
             try:
                 url = f"https://site.api.espn.com/apis/site/v2/sports/soccer/{liga}/scoreboard"
                 r = requests.get(url, timeout=8).json()
@@ -43,39 +49,25 @@ def buscar_v6():
                 fora = j['competitions'][0]['competitors'][1]['team']['displayName']
                 hora = j['date'][11:16]
                 prob = calc_prob(casa, fora)
-
-                msg += f"⚽ {casa} x {fora}\n🏆 {liga.upper()} - {hora}h UTC\n\n"
-                msg += f"📊 PROBABILIDADES:\n"
-                msg += f"✅ Mais de 0.5 Gols: {prob['over05']}% {'🔥' if prob['over05']>90 else ''}\n"
-                msg += f"✅ Mais de 1.5 Gols: {prob['over15']}%\n"
-                msg += f"✅ Ambas Marcam SIM: {prob['btts_sim']}%\n"
-                msg += f"✅ Ambas Marcam NÃO: {prob['btts_nao']}%\n"
-                msg += f"✅ {casa} marca +0.5: {prob['casa_05']}%\n"
-                msg += f"✅ {fora} marca +0.5: {prob['fora_05']}%\n"
-                msg += f"\n💡 MELHOR ENTRADA: "
-                if prob['over05']>90:
-                    msg+= f"Over 0.5 ({prob['over05']}%) - MAIS SEGURO\n"
-                elif prob['over15']>75:
-                    msg+= f"Over 1.5 ({prob['over15']}%)\n"
-                else:
-                    msg+= f"BTTS Sim ({prob['btts_sim']}%)\n"
+                msg += f"⚽ {casa} x {fora}\n🏆 {liga.upper()} - {hora}h UTC\n\n📊 PROBABILIDADES:\n✅ Over 0.5: {prob['over05']}% {'🔥' if prob['over05']>90 else ''}\n✅ Over 1.5: {prob['over15']}%\n✅ BTTS SIM: {prob['btts_sim']}%\n✅ BTTS NÃO: {prob['btts_nao']}%\n✅ {casa[:12]} +0.5: {prob['casa_05']}%\n✅ {fora[:12]} +0.5: {prob['fora_05']}%\n\n💡 MELHOR: "
+                if prob['over05']>90: msg+= f"Over 0.5 ({prob['over05']}%)\n"
+                elif prob['over15']>75: msg+= f"Over 1.5 ({prob['over15']}%)\n"
+                else: msg+= f"BTTS Sim ({prob['btts_sim']}%)\n"
                 msg += "━━━━━━━━━━━━━━━\n\n"
                 count+=1
-            except:
-                continue
-
-        msg += "⚠️ % baseada em estatística dos últimos jogos, não garantia.\nGestão: 2% banca por entrada. 18+"
+            except: continue
+        msg += "⚠️ % estatística, não garantia. Gestão 2% banca. 18+"
         return msg
     except Exception as e:
         return f"Erro: {e}"
 
 @bot.message_handler(commands=['start'])
 def start(m):
-    bot.reply_to(m, "🤖 PERFINA V6 MULTI MERCADOS\n\n/palpite - Análise completa com %\n/green\n/red\n/placar")
+    bot.reply_to(m, "🤖 PERFINA V6.1 FIX 409 OK!\n\n/palpite - Multi mercados com %\n/green\n/red\n/placar")
 
 @bot.message_handler(commands=['palpite'])
 def palpite(m):
-    bot.send_message(m.chat.id, "🔍 Analisando 5 mercados por jogo...")
+    bot.send_message(m.chat.id, "🔍 Analisando 5 mercados...")
     placar["pendente"]+=1
     bot.send_message(m.chat.id, buscar_v6())
 
@@ -93,14 +85,15 @@ def outros(m):
     elif 'placar' in txt:
         t=placar["green"]+placar["red"]
         pct=(placar["green"]/t*100) if t>0 else 0
-        bot.reply_to(m, f"📊 {placar['green']} GREEN\n❌ {placar['red']} RED\n⏳ {placar['pendente']} PEND\n{pct:.1f}%")
+        bot.reply_to(m, f"📊 {placar['green']}G {placar['red']}R {placar['pendente']}P\n{pct:.1f}%")
     else:
         placar.update({"green":0,"red":0,"pendente":0})
         bot.reply_to(m, "🔄 Zerado!")
 
 def run_bot():
-    print(">>> V6 MULTI MERCADOS <<<")
-    bot.infinity_polling()
+    print(">>> V6.1 FIX 409 - MATANDO WEBHOOK <<<")
+    time.sleep(5)
+    bot.infinity_polling(skip_pending=True)
 
 if __name__ == "__main__":
     threading.Thread(target=run_bot, daemon=True).start()
