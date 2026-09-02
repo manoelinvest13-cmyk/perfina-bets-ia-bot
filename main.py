@@ -7,7 +7,9 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 bot = telebot.TeleBot(BOT_TOKEN)
 ARQUIVO = "placar.json"
 app = Flask(__name__)
-
+@app.route('/')
+def home():
+    return "BOT V4.1 ON - Perfina Bets IA", 200
 MERCADOS = [
     "Over 1.5 Gols @1.42 - 88% conf - xG alto hoje",
     "Ambas Marcam SIM @1.75 - 82% - defesa vulnerável",
