@@ -6,7 +6,7 @@ import random
 from datetime import datetime
 
 # SEUS DADOS
-TOKEN = 8974124974:AAElKqLMUpH5ukWFpP1B8d_77a-BD2YyNUw
+TOKEN = "8974124974:AAE1KqLMUpH5ukWFpP1B8d_77a-BD2YyNUw"
 SEU_ID = 5297279818  # Manoel Junior
 
 bot = telebot.TeleBot(TOKEN)
