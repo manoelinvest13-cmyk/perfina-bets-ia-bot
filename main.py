@@ -1,10 +1,17 @@
-import os, json, random
+import os, json, random, time
 from datetime import datetime
 import telebot
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 bot = telebot.TeleBot(BOT_TOKEN)
 ARQUIVO = "placar.json"
+
+# LIMPA QUALQUER WEBHOOK TRAVADO
+try:
+    bot.remove_webhook()
+    time.sleep(2)
+except:
+    pass
 
 def carregar():
     if not os.path.exists(ARQUIVO): return []
@@ -41,5 +48,5 @@ def placar(m):
     lucro=g*0.85-r
     bot.reply_to(m, f"📊 PLACAR DO DIA - {hoje}\n\n✅ {g} GREENS\n❌ {r} REDS\n\n📈 {taxa:.1f}% acerto\n💰 {lucro:+.1f} unidades")
 
-print("BOT V2 RODANDO...")
-bot.infinity_polling()
+print("BOT V2 RODANDO... LIMPANDO CONFLITO")
+bot.infinity_polling(timeout=30, long_polling_timeout=30)
