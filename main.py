@@ -1,9 +1,9 @@
 import os, json, random
 from datetime import datetime
-from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+import telebot
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+bot = telebot.TeleBot(BOT_TOKEN)
 ARQUIVO = "placar.json"
 
 def carregar():
@@ -14,45 +14,32 @@ def carregar():
 
 def salvar(jogo,palpite):
     dados=carregar()
-    dados.append({
-        "data": datetime.now().strftime("%d/%m/%Y"),
-        "jogo": jogo,
-        "palpite": palpite,
-        "status": random.choice(['green','green','green','red','pendente']),
-        "odd":1.85
-    })
+    dados.append({"data":datetime.now().strftime("%d/%m/%Y"),"jogo":jogo,"palpite":palpite,"status":random.choice(['green','green','red']),"odd":1.85})
     with open(ARQUIVO,'w') as f: json.dump(dados,f,indent=2)
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🔥 Perfina Bets IA V2 ON!\n\n/palpite\n/placar")
+@bot.message_handler(commands=['start'])
+def start(m):
+    bot.reply_to(m, "🔥 Perfina Bets IA V2 ON!\n\n/palpite - gerar palpite\n/placar - ver Greens e Reds do dia")
 
-async def palpite(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    jogos=["Flamengo x Palmeiras","Man City x Arsenal","Real Madrid x Barca","Inter x Milan"]
+@bot.message_handler(commands=['palpite'])
+def palpite(m):
+    jogos=["Flamengo x Palmeiras","Man City x Arsenal","Real Madrid x Barca"]
     mercados=["Ambas Marcam SIM","Over 1.5 Gols","Over 0.5 HT"]
     jogo=random.choice(jogos)
     mercado=random.choice(mercados)
     salvar(jogo,mercado)
-    await update.message.reply_text(f"⚽ *{jogo}*\n💰 Palpite: *{mercado}*\n🎯 Confiança: {random.randint(80,92)}%\n\nAcompanhe em /placar", parse_mode='Markdown')
+    bot.reply_to(m, f"⚽ {jogo}\n💰 Palpite: {mercado}\n🎯 Confiança: {random.randint(80,92)}%\n\nVeja /placar")
 
-async def placar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+@bot.message_handler(commands=['placar'])
+def placar(m):
     hoje=datetime.now().strftime("%d/%m/%Y")
     dados=carregar()
     do_dia=[d for d in dados if d['data']==hoje]
     g=len([d for d in do_dia if d['status']=='green'])
     r=len([d for d in do_dia if d['status']=='red'])
-    p=len([d for d in do_dia if d['status']=='pendente'])
-    total=g+r
-    taxa=(g/total*100) if total>0 else 0
+    taxa=(g/(g+r)*100) if (g+r)>0 else 0
     lucro=g*0.85-r
-    await update.message.reply_text(f"📊 *PLACAR DO DIA - {hoje}*\n\n✅ {g} GREENS\n❌ {r} REDS\n⏳ {p} Pendentes\n\n📈 {taxa:.1f}% acerto\n💰 {lucro:+.1f} unidades", parse_mode='Markdown')
+    bot.reply_to(m, f"📊 PLACAR DO DIA - {hoje}\n\n✅ {g} GREENS\n❌ {r} REDS\n\n📈 {taxa:.1f}% acerto\n💰 {lucro:+.1f} unidades")
 
-def main():
-    app=ApplicationBuilder().token(BOT_TOKEN).build()
-    app.add_handler(CommandHandler("start",start))
-    app.add_handler(CommandHandler("palpite",palpite))
-    app.add_handler(CommandHandler("placar",placar))
-    print("BOT V2 RODANDO...")
-    app.run_polling()
-
-if __name__=="__main__":
-    main()
+print("BOT V2 RODANDO...")
+bot.infinity_polling()
