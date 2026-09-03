@@ -18,63 +18,74 @@ def salvar(d):
     with open(ARQ,"w") as f: json.dump(d,f)
 DADOS = carregar()
 
+def safe_int(v):
+    try: return int(str(v).strip() or 0)
+    except: return 0
+
 def placar_linha():
     g=DADOS["green"]; r=DADOS["red"]
-    total=g+r
-    pct=(g/total*100) if total>0 else 0
+    total=g+r; pct=(g/total*100) if total>0 else 0
     pend=len(DADOS["ativos"])
     return f"📊 {g}G x {r}R | ⏳ {pend} pend\n📈 {pct:.1f}% | ⚠️ 2% banca 18+ | ⏰ Auto 30min"
 
 def buscar():
     agora=datetime.now(timezone.utc)
     jogos=[]
-    hoje=(agora-timedelta(hours=3)).strftime("%Y%m%d") # BRT
-    amanha=(agora-timedelta(hours=3)+timedelta(days=1)).strftime("%Y%m%d")
-    urls=[
-        f"https://site.api.espn.com/apis/site/v2/sports/soccer/all/scoreboard?dates={hoje}",
-        f"https://site.api.espn.com/apis/site/v2/sports/soccer/all/scoreboard?dates={amanha}",
+    # BRT = UTC-3
+    hoje_brt = (agora - timedelta(hours=3)).strftime("%Y%m%d")
+    amanha_brt = (agora - timedelta(hours=3) + timedelta(days=1)).strftime("%Y%m%d")
+
+    fontes=[
+        f"https://site.api.espn.com/apis/site/v2/sports/soccer/all/scoreboard?dates={hoje_brt}",
+        f"https://site.api.espn.com/apis/site/v2/sports/soccer/all/scoreboard?dates={amanha_brt}",
         f"https://site.api.espn.com/apis/site/v2/sports/soccer/bra.copa_do_brazil/scoreboard",
         f"https://site.api.espn.com/apis/site/v2/sports/soccer/bra.1/scoreboard",
+        f"https://site.api.espn.com/apis/site/v2/sports/soccer/eng.1/scoreboard",
     ]
-    for url in urls:
+    for url in fontes:
         try:
-            res=requests.get(url,timeout=10).json()
-            ligas=res.get("leagues",[]) if "leagues" in res else [{"abbreviation":"BRA","name":"Brasileirão","events":res.get("events",[])}]
+            res=requests.get(url,timeout=10,headers={"User-Agent":"Mozilla/5.0"}).json()
+            ligas=res.get("leagues",[])
+            if not ligas and "events" in res:
+                ligas=[{"abbreviation":"BRA","name":"Brasileirão","events":res["events"]}]
             for lg in ligas:
-                abbr=str(lg.get("abbreviation",""))
+                abbr=str(lg.get("abbreviation","BRA"))
                 if "NICARAGUA" in abbr.upper(): continue
                 for ev in lg.get("events",[]):
-                    comp=ev["competitions"][0]
-                    st=comp["status"]["type"]["name"]
-                    dt=datetime.fromisoformat(comp["date"].replace("Z","+00:00"))
-                    diff=(dt-agora).total_seconds()/3600
-                    if st=="STATUS_IN_PROGRESS" or (0<=diff<=6) or st=="STATUS_FINAL":
+                    try:
+                        comp=ev["competitions"][0]
+                        st=comp["status"]["type"]["name"]
+                        dt=datetime.fromisoformat(comp["date"].replace("Z","+00:00"))
+                        diff=(dt-agora).total_seconds()/3600
+                        # PEGA AO VIVO ou até 6h pra frente
+                        if not ("PROGRESS" in st or "FINAL" in st or (0<=diff<=6)):
+                            continue
                         if any(x["id"]==ev["id"] for x in jogos): continue
-                        mand=comp["competitors"][0]["team"]["shortDisplayName"]
-                        vis=comp["competitors"][1]["team"]["shortDisplayName"]
-                        gols=int(comp["competitors"][0].get("score",0))+int(comp["competitors"][1].get("score",0))
+                        c0=comp["competitors"][0]
+                        c1=comp["competitors"][1]
+                        placar=f"{c0.get('score','0')}x{c1.get('score','0')}"
+                        gols=safe_int(c0.get('score'))+safe_int(c1.get('score'))
                         jogos.append({
-                            "id":ev["id"],"liga":abbr or lg.get("name",""),"nome":lg.get("name",""),
-                            "mand":mand,"vis":vis,
+                            "id":ev["id"],"liga":abbr,"nome":lg.get("name","Copa"),
+                            "mand":c0["team"]["shortDisplayName"],"vis":c1["team"]["shortDisplayName"],
                             "status":st,"min":comp["status"].get("displayClock",""),
-                            "placar":f"{comp['competitors'][0].get('score','0')}x{comp['competitors'][1].get('score','0')}",
-                            "gols":gols,"dt":dt
+                            "placar":placar,"gols":gols,"dt":dt
                         })
+                    except: continue
         except: continue
     return jogos
 
 def card(j):
-    agora_brt=datetime.now(timezone.utc)-timedelta(hours=3)
+    brt=datetime.now(timezone.utc)-timedelta(hours=3)
     if "PROGRESS" in j["status"]:
-        situ=f"🔴 AO VIVO {j['min']} - {j['placar']}"
+        situ=f"🔴 AO VIVO {j['min']} {j['placar']}"
     elif "FINAL" in j["status"]:
         situ=f"🏁 FINAL {j['placar']}"
     else:
         hora=(j["dt"]-timedelta(hours=3)).strftime("%H:%M")
         situ=f"⏰ {hora} BRT - EM BREVE"
-
     return (f"🚀 PerfinaBet V10 Turbo\n"
-            f"📅 {agora_brt.strftime('%d/%m %H:%M')} BRT | {j['liga'].upper()}\n"
+            f"📅 {brt.strftime('%d/%m %H:%M')} BRT | {j['liga']}\n"
             f"━━━━━━━━━━━━\n"
             f"⚽ {j['mand']} x {j['vis']}\n"
             f"{situ}\n"
@@ -87,16 +98,12 @@ def card(j):
             f"━━━━━━━━━━━━\n"
             f"{placar_linha()}")
 
-# --- COMANDOS ---
 @BOT.message_handler(commands=['placar','start'])
-def p(m):
-    BOT.send_message(m.chat.id, f"🚀 PerfinaBet V10 Turbo\n\n{placar_linha()}")
+def cmd_p(m): BOT.send_message(m.chat.id, f"🚀 PerfinaBet V10 Turbo\n\n{placar_linha()}")
 
 @BOT.message_handler(commands=['palpite'])
-def palpite(m):
-    jogos=buscar()
-    # Filtra só AO VIVO e próximos
-    jogos=[j for j in jogos if "FINAL" not in j["status"]]
+def cmd_palpite(m):
+    jogos=[j for j in buscar() if "FINAL" not in j["status"]]
     if not jogos:
         BOT.send_message(m.chat.id, f"🚀 PerfinaBet V10 Turbo\n📅 {(datetime.now(timezone.utc)-timedelta(hours=3)).strftime('%d/%m %H:%M')} BRT\n━━━━━━━━━━━━\n✅ Sem jogos bons nas próximas 6h.\nAguardando AO VIVO.\n━━━━━━━━━━━━\n\n{placar_linha()}")
         return
@@ -107,65 +114,38 @@ def palpite(m):
         BOT.send_message(m.chat.id, card(j))
 
 @BOT.message_handler(commands=['green'])
-def g(m):
+def cmd_g(m):
     DADOS["green"]+=1
     if DADOS["ativos"]: DADOS["ativos"].pop(next(iter(DADOS["ativos"])))
-    salvar(DADOS); BOT.send_message(m.chat.id, f"✅ GREEN\n\n{placar_linha()}")
+    salvar(DADOS); BOT.send_message(m.chat.id, f"✅ GREEN MANUAL\n\n{placar_linha()}")
 @BOT.message_handler(commands=['red'])
-def r(m):
+def cmd_r(m):
     DADOS["red"]+=1
     if DADOS["ativos"]: DADOS["ativos"].pop(next(iter(DADOS["ativos"])))
-    salvar(DADOS); BOT.send_message(m.chat.id, f"❌ RED\n\n{placar_linha()}")
+    salvar(DADOS); BOT.send_message(m.chat.id, f"❌ RED MANUAL\n\n{placar_linha()}")
 
-# --- AUTO GREEN/RED + AUTO 30MIN ---
 def loop():
     while True:
         try:
-            # 1. Verifica se algum pendente virou Green automático
+            # GREEN AUTOMÁTICO
+            todos=buscar()
             for idj in list(DADOS["ativos"].keys()):
-                js=DADOS["ativos"][idj]
-                try:
-                    todos=buscar()
-                    achou=[x for x in todos if x["id"]==idj]
-                    if not achou: # sumiu = finalizou
-                        # Se teve gol, é Green (Over 0.5)
-                        # Como não temos placar final, consideramos Green se já tinha gol ou se passou 90min
-                        DADOS["green"]+=1
-                        DADOS["ativos"].pop(idj)
-                        salvar(DADOS)
-                        BOT.send_message(CHAT_ID, f"✅ GREEN AUTOMÁTICO\n⚽ {js['mand']} x {js['vis']}\nOver 0.5 bateu!\n\n{placar_linha()}")
-                    else:
-                        j=achou[0]
-                        if "FINAL" in j["status"]:
-                            if j["gols"]>=1:
-                                DADOS["green"]+=1
-                                msg="✅ GREEN AUTOMÁTICO"
-                            else:
-                                DADOS["red"]+=1
-                                msg="❌ RED AUTOMÁTICO"
-                            DADOS["ativos"].pop(idj)
-                            salvar(DADOS)
-                            BOT.send_message(CHAT_ID, f"{msg}\n⚽ {j['mand']} {j['placar']} {j['vis']}\n\n{placar_linha()}")
-                        elif j["gols"]>=1 and j["id"] in DADOS["ativos"]:
-                            # Gol ao vivo = green na hora
-                            DADOS["green"]+=1
-                            DADOS["ativos"].pop(idj)
-                            salvar(DADOS)
-                            BOT.send_message(CHAT_ID, f"✅ GREEN AUTOMÁTICO AO VIVO!\n⚽ {j['mand']} {j['placar']} {j['vis']} - {j['min']}\n\n{placar_linha()}")
-                except: pass
-
-            # 2. Auto 30min - busca jogos ao vivo
-            jogos=[j for j in buscar() if "PROGRESS" in j["status"]]
-            for j in jogos:
+                achou=[x for x in todos if x["id"]==idj]
+                if achou:
+                    j=achou[0]
+                    if j["gols"]>=1:
+                        DADOS["green"]+=1; DADOS["ativos"].pop(idj); salvar(DADOS)
+                        BOT.send_message(CHAT_ID, f"✅ GREEN AUTOMÁTICO!\n⚽ {j['mand']} {j['placar']} {j['vis']} {j['min']}\n\n{placar_linha()}")
+                    elif "FINAL" in j["status"] and j["gols"]==0:
+                        DADOS["red"]+=1; DADOS["ativos"].pop(idj); salvar(DADOS)
+                        BOT.send_message(CHAT_ID, f"❌ RED AUTOMÁTICO\n⚽ {j['mand']} {j['placar']} {j['vis']}\n\n{placar_linha()}")
+            # AUTO AO VIVO
+            vivos=[j for j in todos if "PROGRESS" in j["status"]]
+            for j in vivos:
                 if j["id"] not in DADOS["ativos"]:
-                    DADOS["ativos"][j["id"]]=j
-                    salvar(DADOS)
+                    DADOS["ativos"][j["id"]]=j; salvar(DADOS)
                     BOT.send_message(CHAT_ID, f"⏰ AUTO V10 - 30MIN\n\n{card(j)}")
-            if not jogos:
-                # Só manda "sem jogos" se não tiver pendente
-                if len(DADOS["ativos"])==0:
-                    BOT.send_message(CHAT_ID, f"⏰ AUTO V10 - 30MIN\n\n🚀 PerfinaBet V10 Turbo\n📅 {(datetime.now(timezone.utc)-timedelta(hours=3)).strftime('%d/%m %H:%M')} BRT\n━━━━━━━━━━━━\n✅ Sem jogos bons nas próximas 6h.\nAguardando AO VIVO.\n━━━━━━━━━━━━\n\n{placar_linha()}")
-        except Exception as e: print(e)
+        except Exception as e: print("loop erro",e)
         time.sleep(1800)
 
 threading.Thread(target=loop,daemon=True).start()
@@ -174,7 +154,7 @@ def poll():
     last=0
     while True:
         try:
-            ups=BOT.get_updates(offset=last+1,timeout=25)
+            ups=BOT.get_updates(offset=last+1,timeout=20)
             for u in ups:
                 last=u.update_id
                 BOT.process_new_updates([u])
